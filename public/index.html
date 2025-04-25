@@ -1,1 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ride Allocation System</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      position: relative;
+    }
+    /* Live clock in top-right */
+    #clock {
+      position: fixed;
+      top: 10px;
+      right: 20px;
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+    .container {
+      display: flex;
+      gap: 20px;
+      margin-top: 40px; /* give room for clock */
+    }
+    .section {
+      flex: 1;
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 5px;
+    }
+    h1, h2 {
+      text-align: center;
+      color: #333;
+    }
+    .driver, .passenger, .ride {
+      margin-bottom: 10px;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .driver.available { background-color: #d4edda; }
+    .driver.busy      { background-color: #f8d7da; }
+    .passenger.waiting  { background-color: #e2e3e5; }
+    .passenger.assigned { background-color: #d4edda; border-left: 4px solid #28a745; }
+    .passenger.completed{ background-color: #f8d7da; border-left: 4px solid #dc3545; }
+    .ride {
+      background-color: #cce5ff;
+    }
+    button {
+      padding: 8px 15px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background-color: #0056b3; }
+    input {
+      padding: 8px;
+      margin: 5px 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .status-waiting   { color: #6c757d;  font-weight: bold; }
+    .status-assigned  { color: #28a745;  font-weight: bold; }
+    .status-completed { color: #dc3545;  font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div id="clock">--:--:--</div>
+  <h1>Ride Allocation System using MongoDB - 23BAI1570</h1>
+  
+  <div class="container">
+    <!-- Drivers -->
+    <div class="section">
+      <h2>👨‍✈️ Drivers</h2>
+      <div id="driversList"></div>
+    </div>
+    
+    <!-- Passengers -->
+    <div class="section">
+      <h2>👦 Passengers 👧</h2>
+      <div id="passengersList"></div>
+      <div id="addPassengerForm">
+        <h3>Request Ride</h3>
+        <input type="text" id="passengerName" placeholder="Passenger Name" required>
+        <input type="text" id="passengerLocation" placeholder="Location" required>
+        <button onclick="addPassenger()">Request Ride</button>
+      </div>
+    </div>
+    
+    <!-- Active Rides -->
+    <div class="section">
+      <h2>🚗 Active Rides</h2>
+      <div id="ridesList"></div>
+    </div>
+  </div>
 
+  <script>
+    // ─── Live Clock ────────────────────────────────────────────────────────────
+    function updateClock() {
+      document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ─── Fetch & Render Data ──────────────────────────────────────────────────
+    async function fetchData() {
+      await Promise.all([loadDrivers(), loadPassengers(), loadRides()]);
+    }
+
+    // Drivers
+    async function loadDrivers() {
+      const res = await fetch('/api/drivers');
+      const drivers = await res.json();
+      const container = document.getElementById('driversList');
+      container.innerHTML = '';
+      drivers.forEach(d => {
+        const div = document.createElement('div');
+        div.className = 'driver ' + (d.available ? 'available' : 'busy');
+        div.innerHTML = `
+          <h3>${d.name}</h3>
+          <p>Location: ${d.location}</p>
+          <p>Status: ${d.available ? 'Available' : 'On Ride'}</p>
+          ${d.currentRide ? `<p>Ride ID: ${d.currentRide._id}</p>` : ''}
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    // Passengers
+    async function loadPassengers() {
+      const res = await fetch('/api/passengers');
+      const passengers = await res.json();
+      const container = document.getElementById('passengersList');
+      container.innerHTML = '';
+      
+      // completed at bottom
+      passengers.sort((a,b) => {
+        if (a.status==='completed' && b.status!=='completed') return 1;
+        if (b.status==='completed' && a.status!=='completed') return -1;
+        return 0;
+      }).forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'passenger ' + p.status;
+        div.innerHTML = `
+          <h3>${p.name}</h3>
+          <p>Location: ${p.location}</p>
+          <p>Status: 
+            <span class="status-${p.status}">
+              ${p.status.toUpperCase()}
+            </span>
+          </p>
+          ${p.assignedDriver ? `<p>Driver: ${p.assignedDriver.name}</p>` : ''}
+          ${p.status==='completed'
+            ? `<p>Completed at: ${new Date(p.completedAt).toLocaleTimeString()}</p>`
+            : ''
+          }
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    // Rides with countdown
+    function getRemainingSeconds(startTime) {
+      const elapsed = Date.now() - new Date(startTime).getTime();
+      return Math.max(0, Math.ceil((30000 - elapsed) / 1000));
+    }
+
+    async function loadRides() {
+      const res = await fetch('/api/rides');
+      const rides = await res.json();
+      const container = document.getElementById('ridesList');
+      container.innerHTML = '';
+      rides.filter(r=> r.status==='active').forEach(r => {
+        const rem = getRemainingSeconds(r.startTime);
+        const div = document.createElement('div');
+        div.className = 'ride';
+        div.innerHTML = `
+          <h3>Ride ID: ${r._id}</h3>
+          <p>Passenger: ${r.passenger.name}</p>
+          <p>Driver: ${r.driver.name}</p>
+          <p>Status: ${r.status}</p>
+          <p>Started: ${new Date(r.startTime).toLocaleTimeString()}</p>
+          <p>Time remaining: <span class="countdown" data-start="${r.startTime}">${rem}s</span></p>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    // Update countdowns every second
+    setInterval(() => {
+      document.querySelectorAll('.countdown').forEach(span => {
+        const start = span.getAttribute('data-start');
+        span.textContent = getRemainingSeconds(start) + 's';
+      });
+    }, 1000);
+
+    // Initial load + auto-refresh
+    fetchData();
+    setInterval(fetchData, 2000);
+
+    // ─── Add Passenger ─────────────────────────────────────────────────────────
+    function addPassenger() {
+      const nameEl = document.getElementById('passengerName');
+      const locEl  = document.getElementById('passengerLocation');
+      const name = nameEl.value.trim(), loc = locEl.value.trim();
+      if (!name || !loc) return alert('Please fill both fields');
+
+      fetch('/api/passengers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, location: loc })
+      })
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          return alert(data.message || 'Error requesting ride');
+        }
+        nameEl.value = '';
+        locEl.value  = '';
+        fetchData();
+      })
+      .catch(err => console.error(err));
+    }
+  </script>
+</body>
+</html>
